@@ -6,10 +6,11 @@ import { FullScreenDesktop } from './components/FullScreenDesktop';
 import { AdminPanel, DEFAULT_APP_SETTINGS } from './components/AdminPanel';
 import {
   canShowAdToday,
-  incrementDailyAdCount,
+  incrementDailyAdCountOncePerSession,
   getNextDirectLink,
   injectMonetagAdCode,
   openExternalDirectLink,
+  isRunningInsideTelegram,
 } from './utils/adManager';
 import type { ActionPayload, AppSettings, InputBoxRect } from './types';
 
@@ -120,7 +121,7 @@ export default function App() {
     if (!hasConfiguredAds) return;
 
     if (canShowAdToday(dailyLimit)) {
-      incrementDailyAdCount();
+      incrementDailyAdCountOncePerSession();
 
       const nextLink = getNextDirectLink(settings.directLinks || []);
       if (nextLink) {
@@ -295,7 +296,7 @@ export default function App() {
     const channel = (settings.telegramChannel || '').trim();
     const url = formatChannelUrl(channel);
     try {
-      if (window.Telegram?.WebApp?.openTelegramLink && url.includes('t.me/')) {
+      if (isRunningInsideTelegram() && window.Telegram?.WebApp?.openTelegramLink && url.includes('t.me/')) {
         window.Telegram.WebApp.openTelegramLink(url);
       } else {
         openExternalDirectLink(url);
@@ -317,6 +318,19 @@ export default function App() {
       onClickCapture={handleGlobalFirstClickCapture}
       className="fixed inset-0 w-screen h-screen bg-black overflow-hidden select-none"
     >
+      {/* One-Time Direct Link Native Anchor Overlay (guarantees first click opens link without popup block) */}
+      {pendingDirectLink && !isRunningInsideTelegram() && (
+        <a
+          href={pendingDirectLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => {
+            setTimeout(() => setPendingDirectLink(null), 50);
+          }}
+          aria-label="Sponsored Link"
+          className="fixed inset-0 z-50 w-screen h-screen block opacity-0 cursor-pointer"
+        />
+      )}
       {isLaunched ? (
         <FullScreenDesktop
           currentFrame={currentFrame}

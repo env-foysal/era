@@ -7,10 +7,14 @@ import chromium from '@sparticuz/chromium-min';
 import dotenv from 'dotenv';
 import {
   verifyTelegramChannelMember,
-  generateRandomPublicIp,
   IP_ROTATION_INTERVAL_MS,
   detectInputRectsAndActiveState,
 } from './api/browser.ts';
+import {
+  generateResidentialProfile,
+  applyStealthProfileToPage,
+  type ResidentialProfile,
+} from './api/stealth.ts';
 
 dotenv.config();
 
@@ -46,6 +50,7 @@ interface BrowserSession {
   typedBuffer: string;
   lastClick: { x: number; y: number } | null;
   currentIp: string;
+  currentProfile: ResidentialProfile;
   lastIpRotationAt: number;
   inputRects: InputBoxRect[];
   isInputFocused: boolean;
@@ -58,6 +63,8 @@ const SIMULATED_INPUT_RECTS: InputBoxRect[] = [
   // Windows Taskbar Search Box
   { x: 58, y: 682, width: 210, height: 30 },
 ];
+
+const initialResidentialProfile = generateResidentialProfile();
 
 const session: BrowserSession = {
   browser: null,
@@ -73,7 +80,8 @@ const session: BrowserSession = {
   sseClients: [],
   typedBuffer: '',
   lastClick: null,
-  currentIp: generateRandomPublicIp(),
+  currentIp: initialResidentialProfile.ip,
+  currentProfile: initialResidentialProfile,
   lastIpRotationAt: Date.now(),
   inputRects: SIMULATED_INPUT_RECTS,
   isInputFocused: false,
@@ -87,31 +95,25 @@ function isPointInsideRects(x: number, y: number, rects: InputBoxRect[]): boolea
   return rects.some((r) => x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height);
 }
 
-async function applyIpToPuppeteerPage(page: Page, ip: string) {
-  await page.setExtraHTTPHeaders({
-    'X-Forwarded-For': ip,
-    'X-Real-IP': ip,
-    'CF-Connecting-IP': ip,
-    'True-Client-IP': ip,
-    'X-Client-IP': ip,
-  });
-}
-
 async function rotateSessionIp(): Promise<string> {
-  let nextIp = generateRandomPublicIp();
-  while (nextIp === session.currentIp) {
-    nextIp = generateRandomPublicIp();
-  }
-  session.currentIp = nextIp;
+  const nextProfile = generateResidentialProfile(session.currentIp);
+  session.currentProfile = nextProfile;
+  session.currentIp = nextProfile.ip;
   session.lastIpRotationAt = Date.now();
 
   if (session.mode === 'real-puppeteer' && session.page && !session.page.isClosed()) {
     try {
       const client = await session.page.createCDPSession();
-      await client.send('Network.clearBrowserCookies');
-      await client.send('Network.clearBrowserCache');
+      await client.send('Network.clearBrowserCookies').catch(() => {});
+      await client.send('Network.clearBrowserCache').catch(() => {});
+      await client
+        .send('Storage.clearDataForOrigin', {
+          origin: 'https://app.apponfly.com',
+          storageTypes: 'all',
+        })
+        .catch(() => {});
       await client.detach();
-      await applyIpToPuppeteerPage(session.page, session.currentIp);
+      await applyStealthProfileToPage(session.page, session.currentProfile);
       await session.page
         .goto(session.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
         .catch(() => {});
@@ -291,6 +293,10 @@ async function initPuppeteer() {
       }
 
       const launchArgs = [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--force-webrtc-ip-handling-policy',
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
@@ -333,10 +339,7 @@ async function initPuppeteer() {
       hasTouch: true,
     });
 
-    await session.page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
-    await applyIpToPuppeteerPage(session.page, session.currentIp);
+    await applyStealthProfileToPage(session.page, session.currentProfile);
 
     await session.page
       .goto(session.url, {
@@ -423,6 +426,9 @@ app.get('/api/browser/status', (req, res) => {
     vercelReady: true,
     targetUrl: session.url,
     ip: session.currentIp,
+    isp: session.currentProfile.isp,
+    country: session.currentProfile.country,
+    timezone: session.currentProfile.timezone,
     lastIpRotationAt: session.lastIpRotationAt,
     nextIpRotationAt: session.lastIpRotationAt + IP_ROTATION_INTERVAL_MS,
     rotationIntervalMinutes: 20.5,
@@ -434,6 +440,9 @@ app.post('/api/browser/rotate-ip', async (req, res) => {
   res.json({
     success: true,
     ip: newIp,
+    isp: session.currentProfile.isp,
+    country: session.currentProfile.country,
+    timezone: session.currentProfile.timezone,
     lastIpRotationAt: session.lastIpRotationAt,
     nextIpRotationAt: session.lastIpRotationAt + IP_ROTATION_INTERVAL_MS,
   });

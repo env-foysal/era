@@ -26,6 +26,8 @@ import {
   ArrowLeft,
   RefreshCw,
   Globe,
+  RotateCcw,
+  Play,
 } from 'lucide-react';
 import {
   auth,
@@ -35,6 +37,12 @@ import {
   OperationType,
   handleFirestoreError,
 } from '../firebase';
+import {
+  normalizeUrl,
+  resetDailyAdCount,
+  getDailyAdCount,
+  injectMonetagAdCode,
+} from '../utils/adManager';
 import type { AppSettings } from '../types';
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -62,8 +70,19 @@ export const AdminPanel: React.FC = () => {
   const [requireChannelJoin, setRequireChannelJoin] = useState<boolean>(false);
   const [targetUrl, setTargetUrl] = useState<string>('https://app.apponfly.com/trial');
 
-  const [currentIp, setCurrentIp] = useState<string>('Loading...');
+  const [ipInfo, setIpInfo] = useState<{
+    ip: string;
+    isp: string;
+    country: string;
+    timezone: string;
+  }>({
+    ip: 'Loading...',
+    isp: 'Residential ISP',
+    country: 'US',
+    timezone: 'America/New_York',
+  });
   const [rotatingIp, setRotatingIp] = useState<boolean>(false);
+  const [localAdCount, setLocalAdCount] = useState<number>(() => getDailyAdCount());
 
   const [saving, setSaving] = useState<boolean>(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -99,7 +118,14 @@ export const AdminPanel: React.FC = () => {
     try {
       const res = await fetch('/api/browser/status');
       const data = await res.json();
-      if (data.ip) setCurrentIp(data.ip);
+      if (data.ip) {
+        setIpInfo({
+          ip: data.ip,
+          isp: data.isp || 'Residential ISP',
+          country: data.country || 'US',
+          timezone: data.timezone || 'America/New_York',
+        });
+      }
     } catch {
       // ignore
     }
@@ -110,7 +136,14 @@ export const AdminPanel: React.FC = () => {
     try {
       const res = await fetch('/api/browser/rotate-ip', { method: 'POST' });
       const data = await res.json();
-      if (data.ip) setCurrentIp(data.ip);
+      if (data.ip) {
+        setIpInfo({
+          ip: data.ip,
+          isp: data.isp || 'Residential ISP',
+          country: data.country || 'US',
+          timezone: data.timezone || 'America/New_York',
+        });
+      }
     } catch {
       // ignore
     } finally {
@@ -152,22 +185,42 @@ export const AdminPanel: React.FC = () => {
   };
 
   const handleAddDirectLink = () => {
-    const trimmed = newDirectLink.trim();
-    if (!trimmed) return;
+    setSaveError(null);
+    const normalized = normalizeUrl(newDirectLink);
+    if (!normalized) return;
     if (directLinks.length >= 20) {
       setSaveError('Maximum of 20 direct links allowed.');
       return;
     }
-    if (trimmed.length > 500) {
+    if (normalized.length > 500) {
       setSaveError('Direct link cannot exceed 500 characters.');
       return;
     }
-    setDirectLinks((prev) => [...prev, trimmed]);
+    setDirectLinks((prev) => [...prev, normalized]);
     setNewDirectLink('');
   };
 
   const handleRemoveDirectLink = (index: number) => {
     setDirectLinks((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleResetAdCounter = () => {
+    resetDailyAdCount();
+    setLocalAdCount(0);
+    setSaveMessage('Your local daily ad counter has been reset to 0! Ads will show again immediately.');
+    setTimeout(() => setSaveMessage(null), 3000);
+  };
+
+  const handleTestMonetagNow = () => {
+    if (!monetagCode.trim()) {
+      setSaveError('Please enter a Monetag ad script or Zone ID first.');
+      return;
+    }
+    const existing = document.getElementById('monetag-dynamic-container');
+    if (existing) existing.remove();
+    injectMonetagAdCode(monetagCode);
+    setSaveMessage('Monetag ad code injected & triggered!');
+    setTimeout(() => setSaveMessage(null), 3000);
   };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -179,18 +232,21 @@ export const AdminPanel: React.FC = () => {
     setSaveError(null);
 
     const sanitizedLinks = directLinks
-      .map((l) => l.trim().slice(0, 500))
-      .filter((l) => l.length > 0)
+      .map((l) => normalizeUrl(l).slice(0, 500))
+      .filter((l) => l.length > 8)
       .slice(0, 20);
 
     if (newDirectLink.trim() && sanitizedLinks.length < 20) {
-      sanitizedLinks.push(newDirectLink.trim().slice(0, 500));
-      setDirectLinks(sanitizedLinks);
+      const extra = normalizeUrl(newDirectLink).slice(0, 500);
+      if (extra.length > 8) {
+        sanitizedLinks.push(extra);
+        setDirectLinks(sanitizedLinks);
+      }
       setNewDirectLink('');
     }
 
     const payload = {
-      monetagCode: monetagCode.slice(0, 5000),
+      monetagCode: monetagCode.trim().slice(0, 5000),
       directLinks: sanitizedLinks,
       dailyAdLimit: Math.max(0, Math.min(100, Number(dailyAdLimit) || 5)),
       telegramChannel: telegramChannel.trim().slice(0, 200),
@@ -204,7 +260,9 @@ export const AdminPanel: React.FC = () => {
     const path = 'config/app_settings';
     try {
       await setDoc(doc(db, 'config', 'app_settings'), payload);
-      setSaveMessage('All settings have been saved successfully!');
+      resetDailyAdCount();
+      setLocalAdCount(0);
+      setSaveMessage('All settings saved successfully! Local ad counter also reset for testing.');
       setTimeout(() => setSaveMessage(null), 3500);
     } catch (err: any) {
       setSaveError('Failed to save settings.');
@@ -315,18 +373,23 @@ export const AdminPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* Auto IP Rotation Status Banner (Every 20.5 Minutes) */}
+        {/* Stealth Residential IP Rotation Status Banner (Every 20.5 Minutes) */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
               <Globe className="w-5 h-5" />
             </div>
-            <div>
-              <div className="text-xs font-semibold text-white">
-                Automatic IP Rotation (Every 20.5 Minutes)
+            <div className="space-y-0.5">
+              <div className="text-xs font-semibold text-white flex items-center gap-2">
+                <span>Stealth Residential IP (Auto-Rotates Every 20.5m)</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-mono">
+                  WebRTC & Fingerprint Masked
+                </span>
               </div>
               <div className="text-xs text-slate-400 font-mono">
-                Active Session IP: <span className="text-sky-400 font-bold">{currentIp}</span>
+                IP: <span className="text-sky-400 font-bold">{ipInfo.ip}</span> • ISP:{' '}
+                <span className="text-slate-200">{ipInfo.isp}</span> ({ipInfo.country} /{' '}
+                {ipInfo.timezone})
               </div>
             </div>
           </div>
@@ -337,7 +400,7 @@ export const AdminPanel: React.FC = () => {
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-sky-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${rotatingIp ? 'animate-spin' : ''}`} />
-            <span>Rotate IP Now</span>
+            <span>Rotate Residential IP</span>
           </button>
         </div>
 
@@ -399,7 +462,7 @@ export const AdminPanel: React.FC = () => {
 
           {/* 2. Monetag Ad Code (1 Second Delay) & Daily Cap */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Code2 className="w-5 h-5 text-amber-400" />
                 <h2 className="text-sm font-bold text-white">
@@ -424,12 +487,33 @@ export const AdminPanel: React.FC = () => {
               rows={4}
               value={monetagCode}
               onChange={(e) => setMonetagCode(e.target.value)}
-              placeholder="<script src='//...' data-zone='...'></script>"
+              placeholder="<script src='//libtl.com/sdk.js' data-zone='XXXXXX' data-sdk='show_XXXXXX'></script> or Zone ID"
               className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3.5 text-xs text-emerald-300 placeholder-slate-600 focus:outline-none focus:border-sky-500 font-mono"
             />
-            <p className="text-[11px] text-slate-400">
-              Runs automatically 1 second after entering the Mini App (capped at {dailyAdLimit} times per user per day).
-            </p>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <p className="text-[11px] text-slate-400">
+                Supports Monetag Mini App SDK (<code className="text-sky-400">data-sdk="show_..."</code>), MultiTag, In-Page Push, or plain numeric Zone ID. (Your local views today: {localAdCount}/{dailyAdLimit})
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetAdCounter}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset Counter</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestMonetagNow}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-[11px] font-medium text-amber-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <Play className="w-3 h-3" />
+                  <span>Test Ad Now</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* 3. Multiple Direct Links (One-time per click rotation) */}
@@ -443,7 +527,7 @@ export const AdminPanel: React.FC = () => {
 
             <div className="flex gap-2">
               <input
-                type="url"
+                type="text"
                 value={newDirectLink}
                 onChange={(e) => setNewDirectLink(e.target.value)}
                 onKeyDown={(e) => {

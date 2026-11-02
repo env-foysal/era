@@ -1,41 +1,36 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
+import {
+  IP_ROTATION_INTERVAL_MS,
+  generateResidentialProfile,
+  applyStealthProfileToPage,
+  type ResidentialProfile,
+} from './stealth.ts';
+
+export { IP_ROTATION_INTERVAL_MS, generateResidentialProfile, applyStealthProfileToPage };
 
 let globalBrowser: Browser | null = null;
 let globalPage: Page | null = null;
 let lastActiveTime = Date.now();
 let lastIpRotationTime = Date.now();
-let currentVirtualIp = generateRandomPublicIp();
+let currentProfile: ResidentialProfile = generateResidentialProfile();
 
-// 20.5 minutes in milliseconds (20 mins 30 seconds = 1,230,000 ms)
-export const IP_ROTATION_INTERVAL_MS = 20.5 * 60 * 1000;
+export function generateRandomPublicIp(): string {
+  return generateResidentialProfile(currentProfile?.ip).ip;
+}
 
 const DEFAULT_URL = 'https://app.apponfly.com/trial';
 const CHROMIUM_PACK_URL =
   process.env.CHROMIUM_PACK_URL ||
   'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar';
 
-export function generateRandomPublicIp(): string {
-  const blocks = [
-    [45, 33],
-    [104, 16],
-    [172, 67],
-    [185, 199],
-    [198, 51],
-    [203, 0],
-    [89, 187],
-    [146, 70],
-  ];
-  const prefix = blocks[Math.floor(Math.random() * blocks.length)];
-  const third = Math.floor(Math.random() * 254) + 1;
-  const fourth = Math.floor(Math.random() * 254) + 1;
-  return `${prefix[0]}.${prefix[1]}.${third}.${fourth}`;
-}
-
 export function getCurrentIpInfo() {
   return {
-    ip: currentVirtualIp,
+    ip: currentProfile.ip,
+    isp: currentProfile.isp,
+    country: currentProfile.country,
+    timezone: currentProfile.timezone,
     lastRotatedAt: lastIpRotationTime,
     nextRotationAt: lastIpRotationTime + IP_ROTATION_INTERVAL_MS,
     rotationIntervalMinutes: 20.5,
@@ -44,6 +39,10 @@ export function getCurrentIpInfo() {
 
 const FAST_FLAGS = [
   ...chromium.args,
+  '--disable-blink-features=AutomationControlled',
+  '--disable-features=IsolateOrigins,site-per-process',
+  '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+  '--force-webrtc-ip-handling-policy',
   '--disable-gpu',
   '--disable-dev-shm-usage',
   '--no-sandbox',
@@ -125,38 +124,30 @@ export async function verifyTelegramChannelMember(
   }
 }
 
-async function applyIpHeadersToPage(page: Page, ip: string) {
-  await page.setExtraHTTPHeaders({
-    'X-Forwarded-For': ip,
-    'X-Real-IP': ip,
-    'CF-Connecting-IP': ip,
-    'True-Client-IP': ip,
-    'X-Client-IP': ip,
-  });
-}
-
 export async function rotateBrowserIpNow(page?: Page | null): Promise<string> {
-  let nextIp = generateRandomPublicIp();
-  while (nextIp === currentVirtualIp) {
-    nextIp = generateRandomPublicIp();
-  }
-  currentVirtualIp = nextIp;
+  currentProfile = generateResidentialProfile(currentProfile.ip);
   lastIpRotationTime = Date.now();
 
   const targetPage = page || globalPage;
   if (targetPage && !targetPage.isClosed()) {
     try {
       const client = await targetPage.createCDPSession();
-      await client.send('Network.clearBrowserCookies');
-      await client.send('Network.clearBrowserCache');
+      await client.send('Network.clearBrowserCookies').catch(() => {});
+      await client.send('Network.clearBrowserCache').catch(() => {});
+      await client
+        .send('Storage.clearDataForOrigin', {
+          origin: 'https://app.apponfly.com',
+          storageTypes: 'all',
+        })
+        .catch(() => {});
       await client.detach();
-      await applyIpHeadersToPage(targetPage, currentVirtualIp);
+      await applyStealthProfileToPage(targetPage, currentProfile);
       await targetPage.goto(DEFAULT_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     } catch {
       // ignore rotation errors on closed page
     }
   }
-  return currentVirtualIp;
+  return currentProfile.ip;
 }
 
 export async function detectInputRectsAndActiveState(
@@ -260,10 +251,7 @@ export async function getOrLaunchBrowser(customWsEndpoint?: string): Promise<{ b
   const pages = await globalBrowser.pages();
   globalPage = pages.length > 0 ? pages[0] : await globalBrowser.newPage();
 
-  await globalPage.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-  );
-  await applyIpHeadersToPage(globalPage, currentVirtualIp);
+  await applyStealthProfileToPage(globalPage, currentProfile);
 
   if (globalPage.url() === 'about:blank' || !globalPage.url().includes('apponfly')) {
     await globalPage
@@ -465,7 +453,9 @@ export default async function handler(req: IncomingMessage & { body?: any; query
         title: pageTitle,
         isInputFocused: inputCheck.isInputFocused,
         inputRects: inputCheck.inputRects,
-        ip: currentVirtualIp,
+        ip: currentProfile.ip,
+        isp: currentProfile.isp,
+        country: currentProfile.country,
         latencyMs: Date.now() - startTime,
         timestamp: Date.now(),
       })
