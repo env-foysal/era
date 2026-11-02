@@ -1,0 +1,6 @@
+{
+  "name": "AppOnFly Mobile Cloud Browser",
+  "description": "Ultra-fast mobile real-time remote browser runner using puppeteer-core for AppOnFly trial, with touch controls, virtual keyboard, screencast, and Vercel serverless optimization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Configuration for Monetag ads, multiple direct links, daily ad cap, Telegram bot token, and Telegram channel username.",
+      "type": "object",
+      "properties": {
+        "monetagCode": {
+          "type": "string",
+          "description": "Monetag ad script or zone code",
+          "maxLength": 5000
+        },
+        "directLinks": {
+          "type": "array",
+          "description": "List of direct links rotated on user click"
+        },
+        "dailyAdLimit": {
+          "type": "number",
+          "description": "Maximum number of times ads are shown per user per day"
+        },
+        "telegramChannel": {
+          "type": "string",
+          "description": "Telegram channel username (e.g. @channel)",
+          "maxLength": 200
+        },
+        "botToken": {
+          "type": "string",
+          "description": "Telegram Bot API token for channel membership verification",
+          "maxLength": 300
+        },
+        "requireChannelJoin": {
+          "type": "boolean",
+          "description": "Whether users must join the Telegram channel before launching Windows"
+        },
+        "targetUrl": {
+          "type": "string",
+          "description": "Target remote desktop URL",
+          "maxLength": 500
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Email of the admin who updated the settings",
+          "maxLength": 200
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "monetagCode",
+        "directLinks",
+        "dailyAdLimit",
+        "telegramChannel",
+        "botToken",
+        "requireChannelJoin",
+        "targetUrl",
+        "updatedBy",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/config/{configId}": {
+      "schema": "AppSettings",
+      "description": "Application configuration document modified only by verified admin."
+    }
+  }
+}

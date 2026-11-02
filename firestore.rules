@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'fa9311671@gmail.com'
+          || request.auth.token.email == 'foysal0cx@gmail.com'
+        );
+    }
+
+    // 3. Validation Blueprint for AppSettings (/config/{configId})
+    function isValidAppSettings(data) {
+      return data.keys().hasAll([
+          'monetagCode',
+          'directLinks',
+          'dailyAdLimit',
+          'telegramChannel',
+          'botToken',
+          'requireChannelJoin',
+          'targetUrl',
+          'updatedBy',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'monetagCode',
+          'directLinks',
+          'dailyAdLimit',
+          'telegramChannel',
+          'botToken',
+          'requireChannelJoin',
+          'targetUrl',
+          'updatedBy',
+          'updatedAt'
+        ])
+        && data.monetagCode is string && data.monetagCode.size() <= 5000
+        && data.directLinks is list && data.directLinks.size() <= 20
+        && (data.directLinks.size() == 0 || (data.directLinks[0] is string && data.directLinks[0].size() <= 500))
+        && data.dailyAdLimit is number && data.dailyAdLimit >= 0 && data.dailyAdLimit <= 100
+        && data.telegramChannel is string && data.telegramChannel.size() <= 200
+        && data.botToken is string && data.botToken.size() <= 300
+        && data.requireChannelJoin is bool
+        && data.targetUrl is string && data.targetUrl.size() <= 500
+        && data.updatedBy is string && data.updatedBy.size() <= 200
+        && data.updatedBy == request.auth.token.email
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    // 4. App Settings Collection (Single Document Get Allowed, Admin Write Only)
+    match /config/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if false;
+      allow create: if isAdmin() && isValidId(configId) && isValidAppSettings(incoming());
+      allow update: if isValidAppSettings(incoming()) && isAdmin() && isValidId(configId) && (
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'monetagCode',
+          'directLinks',
+          'dailyAdLimit',
+          'telegramChannel',
+          'botToken',
+          'requireChannelJoin',
+          'targetUrl',
+          'updatedBy',
+          'updatedAt'
+        ])
+      );
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+  }
+}
