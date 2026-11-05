@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { Play, Send, ExternalLink, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { db } from './firebase';
@@ -12,7 +12,7 @@ import {
   openExternalDirectLink,
   isRunningInsideTelegram,
 } from './utils/adManager';
-import type { ActionPayload, AppSettings, InputBoxRect } from './types';
+import type { ActionPayload, AppSettings, InputBoxRect, IpInfo } from './types';
 
 // 20.5 minutes in milliseconds (1,230,000 ms)
 const IP_ROTATION_INTERVAL_MS = 20.5 * 60 * 1000;
@@ -54,7 +54,9 @@ export default function App() {
   const [currentFrame, setCurrentFrame] = useState<string | null>(null);
   const [inputRects, setInputRects] = useState<InputBoxRect[]>([]);
   const [isInputFocused, setIsInputFocused] = useState<boolean>(false);
+  const [ipInfo, setIpInfo] = useState<IpInfo | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const isFetchingSnapshotRef = useRef<boolean>(false);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -137,18 +139,13 @@ export default function App() {
     }
   }, [isAdminRoute, settingsLoaded, settings]);
 
-  // Connect to Puppeteer SSE Stream & 20.5-Minute IP Rotation Timer once Launched
-  useEffect(() => {
-    if (!isLaunched || isAdminRoute) return;
-
-    let active = true;
-    const sse = new EventSource('/api/browser/stream');
-    eventSourceRef.current = sse;
-
-    sse.onmessage = (e) => {
-      if (!active) return;
-      try {
-        const data = JSON.parse(e.data);
+  const fetchSnapshot = useCallback(async () => {
+    if (isFetchingSnapshotRef.current) return;
+    isFetchingSnapshotRef.current = true;
+    try {
+      const res = await fetch('/api/browser/snapshot');
+      if (res.ok) {
+        const data = await res.json();
         if (data.frame) {
           setCurrentFrame(data.frame);
         }
@@ -158,40 +155,153 @@ export default function App() {
         if (typeof data.isInputFocused === 'boolean') {
           setIsInputFocused(data.isInputFocused);
         }
-      } catch {
-        // ignore
+        if (data.ip) {
+          setIpInfo((prev) => ({
+            ip: data.ip,
+            isp: data.isp || prev?.isp || 'Comcast Cable Communications',
+            country: data.country || prev?.country || 'US',
+            timezone: data.timezone || prev?.timezone || 'America/New_York',
+            lastRotatedAt: prev?.lastRotatedAt || Date.now(),
+            nextRotationAt: prev?.nextRotationAt || Date.now() + IP_ROTATION_INTERVAL_MS,
+            rotationIntervalMinutes: 20.5,
+          }));
+        }
       }
-    };
+    } catch {
+      // ignore transient network hiccups
+    } finally {
+      isFetchingSnapshotRef.current = false;
+    }
+  }, []);
 
-    sse.onerror = () => {
-      if (!active) return;
-      setTimeout(async () => {
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/browser/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ip) {
+          setIpInfo({
+            ip: data.ip,
+            isp: data.isp || 'Comcast Cable Communications',
+            country: data.country || 'US',
+            timezone: data.timezone || 'America/New_York',
+            lastRotatedAt: data.lastRotatedAt || Date.now(),
+            nextRotationAt: data.nextRotationAt || Date.now() + IP_ROTATION_INTERVAL_MS,
+            rotationIntervalMinutes: data.rotationIntervalMinutes || 20.5,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Connect to Puppeteer SSE Stream / Adaptive Polling & 20.5-Minute IP Rotation Timer once Launched
+  useEffect(() => {
+    if (!isLaunched || isAdminRoute) return;
+
+    let active = true;
+
+    // Immediately fetch initial snapshot & status (0ms delay)
+    fetchSnapshot();
+    fetchStatus();
+
+    // Setup polling interval for resilient Vercel serverless operation
+    const pollTimer = setInterval(() => {
+      if (active) {
+        fetchSnapshot();
+      }
+    }, 1200);
+
+    // Also attempt SSE for real-time local dev server
+    try {
+      const sse = new EventSource('/api/browser/stream');
+      eventSourceRef.current = sse;
+
+      sse.onmessage = (e) => {
         if (!active) return;
         try {
-          const res = await fetch('/api/browser/snapshot');
-          const data = await res.json();
-          if (data.success && data.frame) {
-            setCurrentFrame(data.frame);
-            if (Array.isArray(data.inputRects)) setInputRects(data.inputRects);
-            if (typeof data.isInputFocused === 'boolean') setIsInputFocused(data.isInputFocused);
+          const data = JSON.parse(e.data);
+          if (data.frame) setCurrentFrame(data.frame);
+          if (Array.isArray(data.inputRects)) setInputRects(data.inputRects);
+          if (typeof data.isInputFocused === 'boolean') setIsInputFocused(data.isInputFocused);
+          if (data.ip) {
+            setIpInfo((prev) => ({
+              ip: data.ip,
+              isp: data.isp || prev?.isp || 'Comcast Cable',
+              country: data.country || prev?.country || 'US',
+              timezone: prev?.timezone || 'America/New_York',
+              lastRotatedAt: prev?.lastRotatedAt || Date.now(),
+              nextRotationAt: data.nextIpRotationAt || prev?.nextRotationAt || Date.now() + IP_ROTATION_INTERVAL_MS,
+              rotationIntervalMinutes: 20.5,
+            }));
           }
         } catch {
           // ignore
         }
-      }, 700);
-    };
+      };
 
-    // Automatic IP rotation every 20.5 minutes (1,230,000 ms)
+      sse.onerror = () => {
+        // Serverless Vercel disconnects SSE; polling handles it seamlessly
+      };
+    } catch {
+      // ignore if SSE is not supported
+    }
+
+    // Automatic IP rotation request every 20.5 minutes (1,230,000 ms)
     const ipRotateTimer = setInterval(() => {
-      fetch('/api/browser/rotate-ip', { method: 'POST' }).catch(() => {});
+      fetch('/api/browser/rotate-ip', { method: 'POST' })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.ip) {
+            setIpInfo({
+              ip: data.ip,
+              isp: data.isp,
+              country: data.country,
+              timezone: data.timezone,
+              lastRotatedAt: data.lastRotatedAt,
+              nextRotationAt: data.nextRotationAt,
+              rotationIntervalMinutes: 20.5,
+            });
+          }
+        })
+        .catch(() => {});
     }, IP_ROTATION_INTERVAL_MS);
 
     return () => {
       active = false;
-      sse.close();
+      clearInterval(pollTimer);
       clearInterval(ipRotateTimer);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
     };
-  }, [isLaunched, isAdminRoute]);
+  }, [isLaunched, isAdminRoute, fetchSnapshot, fetchStatus]);
+
+  // Manual IP rotation trigger
+  const handleManualRotateIp = async () => {
+    try {
+      const res = await fetch('/api/browser/rotate-ip', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ip) {
+          setIpInfo({
+            ip: data.ip,
+            isp: data.isp,
+            country: data.country,
+            timezone: data.timezone,
+            lastRotatedAt: data.lastRotatedAt,
+            nextRotationAt: data.nextRotationAt,
+            rotationIntervalMinutes: 20.5,
+          });
+        }
+      }
+      await fetchSnapshot();
+    } catch {
+      // ignore
+    }
+  };
 
   // Intercept the very first click anywhere to open the Direct Link once
   const handleGlobalFirstClickCapture = () => {
@@ -202,10 +312,10 @@ export default function App() {
     }
   };
 
-  // Send mouse/keyboard actions to Puppeteer and return input focus detection
+  // Send mouse/keyboard actions to backend and return updated input focus + frame
   const sendBrowserAction = async (
     payload: ActionPayload
-  ): Promise<{ isInputFocused?: boolean } | void> => {
+  ): Promise<{ isInputFocused?: boolean; frame?: string } | void> => {
     try {
       const res = await fetch('/api/browser/action', {
         method: 'POST',
@@ -213,13 +323,27 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      if (data.frame) {
+        setCurrentFrame(data.frame);
+      }
       if (Array.isArray(data.inputRects)) {
         setInputRects(data.inputRects);
       }
       if (typeof data.isInputFocused === 'boolean') {
         setIsInputFocused(data.isInputFocused);
-        return { isInputFocused: data.isInputFocused };
       }
+      if (data.ip) {
+        setIpInfo((prev) => ({
+          ip: data.ip,
+          isp: data.isp || prev?.isp || 'Comcast Cable',
+          country: data.country || prev?.country || 'US',
+          timezone: prev?.timezone || 'America/New_York',
+          lastRotatedAt: prev?.lastRotatedAt || Date.now(),
+          nextRotationAt: prev?.nextRotationAt || Date.now() + IP_ROTATION_INTERVAL_MS,
+          rotationIntervalMinutes: 20.5,
+        }));
+      }
+      return { isInputFocused: data.isInputFocused, frame: data.frame };
     } catch {
       // ignore transient network errors
     }
@@ -339,9 +463,13 @@ export default function App() {
           inputRects={inputRects}
           isInputFocused={isInputFocused}
           onSendAction={sendBrowserAction}
+          ipInfo={ipInfo}
+          onManualRotateIp={handleManualRotateIp}
+          targetUrl={settings.targetUrl || 'https://app.apponfly.com/trial'}
+          onBackToLaunch={() => setIsLaunched(false)}
         />
       ) : (
-        /* Pre-Launch Screen for Telegram Mini App (English) */
+        /* Pre-Launch Screen for Telegram Mini App (Clean English UI) */
         <div className="w-full h-full flex flex-col items-center justify-center p-5 bg-gradient-to-b from-slate-950 via-[#041022] to-black text-white relative">
           <div className="w-full max-w-sm bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-md flex flex-col items-center text-center space-y-5">
             {/* Windows Logo Icon */}

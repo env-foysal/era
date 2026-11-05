@@ -17,6 +17,16 @@ export interface ViewportConfig {
   label: string;
 }
 
+export interface IpInfo {
+  ip: string;
+  isp: string;
+  country: string;
+  timezone: string;
+  lastRotatedAt: number;
+  nextRotationAt: number;
+  rotationIntervalMinutes: number;
+}
+
 export interface BrowserStatus {
   status: 'idle' | 'starting' | 'running' | 'error';
   mode: BrowserMode;
@@ -28,6 +38,9 @@ export interface BrowserStatus {
   vercelReady: boolean;
   targetUrl: string;
   ip?: string;
+  isp?: string;
+  country?: string;
+  nextRotationAt?: number;
 }
 
 export interface ActionPayload {

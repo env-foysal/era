@@ -601,6 +601,7 @@ app.post('/api/browser/action', async (req, res) => {
     res.json({
       success: true,
       action: type,
+      frame: session.lastFrame,
       isInputFocused: session.isInputFocused,
       inputRects: session.inputRects,
       ip: session.currentIp,
