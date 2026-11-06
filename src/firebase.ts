@@ -10,6 +10,13 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export const ALLOWED_ADMIN_EMAIL = 'fa9311671@gmail.com';
+export const ALLOWED_ADMIN_EMAILS = ['fa9311671@gmail.com', 'foysal0cx@gmail.com'];
+
+export function isAllowedAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.toLowerCase().trim();
+  return ALLOWED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === clean);
+}
 
 export enum OperationType {
   CREATE = 'create',

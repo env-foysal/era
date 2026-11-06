@@ -34,6 +34,8 @@ import {
   db,
   googleProvider,
   ALLOWED_ADMIN_EMAIL,
+  ALLOWED_ADMIN_EMAILS,
+  isAllowedAdminEmail,
   OperationType,
   handleFirestoreError,
 } from '../firebase';
@@ -96,9 +98,9 @@ export const AdminPanel: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         const email = (currentUser.email || '').toLowerCase();
-        if (email !== ALLOWED_ADMIN_EMAIL.toLowerCase()) {
+        if (!isAllowedAdminEmail(email)) {
           setAuthError(
-            `Access Denied! Only ${ALLOWED_ADMIN_EMAIL} is authorized to sign into the Admin Panel. (Signed in as: ${currentUser.email})`
+            `Access Denied! Only authorized administrators (${ALLOWED_ADMIN_EMAILS.join(', ')}) can sign into the Admin Panel. (Signed in as: ${currentUser.email})`
           );
           await signOut(auth);
           setUser(null);
@@ -181,9 +183,9 @@ export const AdminPanel: React.FC = () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const email = (result.user.email || '').toLowerCase();
-      if (email !== ALLOWED_ADMIN_EMAIL.toLowerCase()) {
+      if (!isAllowedAdminEmail(email)) {
         await signOut(auth);
-        setAuthError(`Access Denied! Only ${ALLOWED_ADMIN_EMAIL} is permitted to log in.`);
+        setAuthError(`Access Denied! Only authorized administrators (${ALLOWED_ADMIN_EMAILS.join(', ')}) are permitted to log in.`);
       }
     } catch (err: any) {
       setAuthError(err?.message || 'Google Sign-In failed.');
@@ -273,7 +275,7 @@ export const AdminPanel: React.FC = () => {
       setSaveMessage('All settings saved successfully! Local ad counter also reset for testing.');
       setTimeout(() => setSaveMessage(null), 3500);
     } catch (err: any) {
-      setSaveError('Failed to save settings.');
+      setSaveError(err?.message ? `Failed to save settings: ${err.message}` : 'Failed to save settings. Please verify you are signed in as an authorized administrator.');
       handleFirestoreError(err, OperationType.WRITE, path);
     } finally {
       setSaving(false);
