@@ -70,6 +70,8 @@ export interface AppSettings {
   botToken: string;
   requireChannelJoin: boolean;
   targetUrl: string;
+  enableIpRotation: boolean;
+  useUserOwnIp: boolean;
   updatedBy: string;
   updatedAt?: any;
 }
@@ -78,10 +80,20 @@ declare global {
   interface Window {
     Telegram?: {
       WebApp?: {
+        version?: string;
+        isVersionAtLeast?: (version: string) => boolean;
         ready: () => void;
         expand: () => void;
         openLink?: (url: string) => void;
         openTelegramLink?: (url: string) => void;
+        CloudStorage?: {
+          setItem: (key: string, value: string, callback?: (err: Error | null, success: boolean) => void) => any;
+          getItem: (key: string, callback: (err: Error | null, value: string | null) => void) => any;
+          getItems: (keys: string[], callback: (err: Error | null, values: Record<string, string | null>) => void) => any;
+          removeItem: (key: string, callback?: (err: Error | null, success: boolean) => void) => any;
+          removeItems: (keys: string[], callback?: (err: Error | null, success: boolean) => void) => any;
+          getKeys: (callback: (err: Error | null, keys: string[]) => void) => any;
+        };
         initDataUnsafe?: {
           user?: {
             id: number;

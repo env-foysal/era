@@ -44,7 +44,7 @@ export function getCurrentIpInfo() {
     timezone: currentProfile.timezone,
     lastRotatedAt: lastIpRotationTime,
     nextRotationAt: lastIpRotationTime + IP_ROTATION_INTERVAL_MS,
-    rotationIntervalMinutes: 20.5,
+    rotationIntervalMinutes: 20.1,
   };
 }
 

@@ -42,6 +42,8 @@ service cloud.firestore {
           'botToken',
           'requireChannelJoin',
           'targetUrl',
+          'enableIpRotation',
+          'useUserOwnIp',
           'updatedBy',
           'updatedAt'
         ])
@@ -53,6 +55,8 @@ service cloud.firestore {
           'botToken',
           'requireChannelJoin',
           'targetUrl',
+          'enableIpRotation',
+          'useUserOwnIp',
           'updatedBy',
           'updatedAt'
         ])
@@ -64,6 +68,8 @@ service cloud.firestore {
         && data.botToken is string && data.botToken.size() <= 300
         && data.requireChannelJoin is bool
         && data.targetUrl is string && data.targetUrl.size() <= 500
+        && data.enableIpRotation is bool
+        && data.useUserOwnIp is bool
         && data.updatedBy is string && data.updatedBy.size() <= 200
         && data.updatedBy == request.auth.token.email
         && data.updatedAt is timestamp && data.updatedAt == request.time;
@@ -83,6 +89,8 @@ service cloud.firestore {
           'botToken',
           'requireChannelJoin',
           'targetUrl',
+          'enableIpRotation',
+          'useUserOwnIp',
           'updatedBy',
           'updatedAt'
         ])

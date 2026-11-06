@@ -53,6 +53,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   botToken: '',
   requireChannelJoin: false,
   targetUrl: 'https://app.apponfly.com/trial',
+  enableIpRotation: true,
+  useUserOwnIp: false,
   updatedBy: ALLOWED_ADMIN_EMAIL,
 };
 
@@ -69,6 +71,8 @@ export const AdminPanel: React.FC = () => {
   const [botToken, setBotToken] = useState<string>('');
   const [requireChannelJoin, setRequireChannelJoin] = useState<boolean>(false);
   const [targetUrl, setTargetUrl] = useState<string>('https://app.apponfly.com/trial');
+  const [enableIpRotation, setEnableIpRotation] = useState<boolean>(true);
+  const [useUserOwnIp, setUseUserOwnIp] = useState<boolean>(false);
 
   const [ipInfo, setIpInfo] = useState<{
     ip: string;
@@ -164,6 +168,8 @@ export const AdminPanel: React.FC = () => {
         setBotToken(data.botToken || '');
         setRequireChannelJoin(Boolean(data.requireChannelJoin));
         setTargetUrl(data.targetUrl || 'https://app.apponfly.com/trial');
+        setEnableIpRotation(data.enableIpRotation !== false);
+        setUseUserOwnIp(Boolean(data.useUserOwnIp));
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.GET, path);
@@ -253,6 +259,8 @@ export const AdminPanel: React.FC = () => {
       botToken: botToken.trim().slice(0, 300),
       requireChannelJoin: Boolean(requireChannelJoin),
       targetUrl: (targetUrl.trim() || 'https://app.apponfly.com/trial').slice(0, 500),
+      enableIpRotation: Boolean(enableIpRotation),
+      useUserOwnIp: Boolean(useUserOwnIp),
       updatedBy: user.email.slice(0, 200),
       updatedAt: serverTimestamp(),
     };
@@ -577,6 +585,55 @@ export const AdminPanel: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* 4. Residential IP & Stealth Controls */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Globe className="w-5 h-5 text-sky-400" />
+              <h2 className="text-sm font-bold text-white">Residential IP & Stealth Controls</h2>
+            </div>
+            <p className="text-xs text-slate-400">
+              Manage automatic IP rotation behavior and direct connection options.
+            </p>
+
+            <div className="space-y-3">
+              {/* Toggle 1: Enable IP Rotation */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-950/70 rounded-xl border border-slate-800 gap-3">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-semibold text-white block">
+                    Automatic IP Rotation (20.1 Minutes)
+                  </label>
+                  <span className="text-[11px] text-slate-400 block">
+                    When enabled, IPs automatically rotate every 20.1 minutes from Singapore & US residential pools (countdown starts after launch). Turn off to keep the same IP.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={enableIpRotation}
+                  onChange={(e) => setEnableIpRotation(e.target.checked)}
+                  className="w-5 h-5 accent-sky-500 rounded cursor-pointer shrink-0"
+                />
+              </div>
+
+              {/* Toggle 2: User's Own IP Mode */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-950/70 rounded-xl border border-slate-800 gap-3">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-semibold text-white block">
+                    Enable User's Own IP (Direct Connection)
+                  </label>
+                  <span className="text-[11px] text-slate-400 block">
+                    When enabled, users connect using their own device's real IP address directly, bypassing the stealth proxy pool.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useUserOwnIp}
+                  onChange={(e) => setUseUserOwnIp(e.target.checked)}
+                  className="w-5 h-5 accent-sky-500 rounded cursor-pointer shrink-0"
+                />
+              </div>
+            </div>
           </div>
 
           {saveMessage && (

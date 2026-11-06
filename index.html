@@ -12,10 +12,159 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      (function() {
+        try {
+          if (window.Telegram && window.Telegram.WebApp) {
+            var tg = window.Telegram.WebApp;
+
+            // Upgrade version to 8.0 so WebApp features (CloudStorage, orientation, etc.) are fully supported
+            try {
+              Object.defineProperty(tg, 'version', {
+                get: function() { return '8.0'; },
+                set: function() {},
+                configurable: true,
+                enumerable: true
+              });
+            } catch(e) {
+              tg.version = '8.0';
+            }
+
+            // Patch isVersionAtLeast to avoid version 6.0 compatibility rejections
+            var origVersionAtLeast = tg.isVersionAtLeast;
+            tg.isVersionAtLeast = function(ver) {
+              if (!ver) return true;
+              var req = parseFloat(ver);
+              if (isNaN(req) || req <= 8.0) return true;
+              if (typeof origVersionAtLeast === 'function') {
+                try {
+                  return origVersionAtLeast.call(tg, ver);
+                } catch(e) {
+                  return true;
+                }
+              }
+              return true;
+            };
+
+            // Polyfill CloudStorage with localStorage fallback so ad networks/scripts never throw WebAppMethodUnsupported
+            var prefix = 'tg_cloud_';
+            var mockCloudStorage = {
+              setItem: function(key, value, callback) {
+                try {
+                  localStorage.setItem(prefix + key, String(value));
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, true); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, false); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              },
+              getItem: function(key, callback) {
+                try {
+                  var val = localStorage.getItem(prefix + key);
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, val); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, null); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              },
+              getItems: function(keys, callback) {
+                try {
+                  var res = {};
+                  if (Array.isArray(keys)) {
+                    for (var i = 0; i < keys.length; i++) {
+                      var k = keys[i];
+                      res[k] = localStorage.getItem(prefix + k);
+                    }
+                  }
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, res); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, {}); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              },
+              removeItem: function(key, callback) {
+                try {
+                  localStorage.removeItem(prefix + key);
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, true); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, false); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              },
+              removeItems: function(keys, callback) {
+                try {
+                  if (Array.isArray(keys)) {
+                    for (var i = 0; i < keys.length; i++) {
+                      localStorage.removeItem(prefix + keys[i]);
+                    }
+                  }
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, true); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, false); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              },
+              getKeys: function(callback) {
+                try {
+                  var keys = [];
+                  for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if (k && k.indexOf(prefix) === 0) {
+                      keys.push(k.substring(prefix.length));
+                    }
+                  }
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(null, keys); }, 0);
+                  }
+                } catch(err) {
+                  if (typeof callback === 'function') {
+                    setTimeout(function() { callback(err, []); }, 0);
+                  }
+                }
+                return mockCloudStorage;
+              }
+            };
+
+            // Override CloudStorage property directly on tg object and its prototype
+            try {
+              Object.defineProperty(tg, 'CloudStorage', {
+                get: function() { return mockCloudStorage; },
+                set: function() {},
+                configurable: true,
+                enumerable: true
+              });
+            } catch(e) {
+              tg.CloudStorage = mockCloudStorage;
+            }
+          }
+        } catch(e) {
+          console.warn('Telegram CloudStorage polyfill notice:', e);
+        }
+      })();
+    </script>
   </head>
   <body class="bg-black text-white overflow-hidden select-none m-0 p-0">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

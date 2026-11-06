@@ -14,8 +14,8 @@ import {
 } from './utils/adManager';
 import type { ActionPayload, AppSettings, InputBoxRect, IpInfo } from './types';
 
-// 20.5 minutes in milliseconds (1,230,000 ms)
-const IP_ROTATION_INTERVAL_MS = 20.5 * 60 * 1000;
+// 20.1 minutes in milliseconds (1,206,000 ms)
+const IP_ROTATION_INTERVAL_MS = 20.1 * 60 * 1000;
 
 function formatChannelUrl(channel: string): string {
   const clean = channel.trim();
@@ -248,36 +248,42 @@ export default function App() {
       // ignore if SSE is not supported
     }
 
-    // Automatic IP rotation request every 20.5 minutes (1,230,000 ms)
-    const ipRotateTimer = setInterval(() => {
-      fetch('/api/browser/rotate-ip', { method: 'POST' })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.ip) {
-            setIpInfo({
-              ip: data.ip,
-              isp: data.isp,
-              country: data.country,
-              timezone: data.timezone,
-              lastRotatedAt: data.lastRotatedAt,
-              nextRotationAt: data.nextRotationAt,
-              rotationIntervalMinutes: 20.5,
-            });
-          }
-        })
-        .catch(() => {});
-    }, IP_ROTATION_INTERVAL_MS);
+    // Automatic IP rotation every 20.1 minutes (starts countdown from launch time)
+    // Only runs if IP rotation is enabled in settings and user's own IP is not enforced
+    const shouldRotate = settings.enableIpRotation !== false && !settings.useUserOwnIp;
+    let ipRotateTimer: any = null;
+
+    if (shouldRotate) {
+      ipRotateTimer = setInterval(() => {
+        fetch('/api/browser/rotate-ip', { method: 'POST' })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.ip) {
+              setIpInfo({
+                ip: data.ip,
+                isp: data.isp,
+                country: data.country,
+                timezone: data.timezone,
+                lastRotatedAt: data.lastRotatedAt,
+                nextRotationAt: data.nextRotationAt,
+                rotationIntervalMinutes: 20.1,
+              });
+            }
+          })
+          .catch(() => {});
+      }, IP_ROTATION_INTERVAL_MS);
+    }
 
     return () => {
       active = false;
       clearInterval(pollTimer);
-      clearInterval(ipRotateTimer);
+      if (ipRotateTimer) clearInterval(ipRotateTimer);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
     };
-  }, [isLaunched, isAdminRoute, fetchSnapshot, fetchStatus]);
+  }, [isLaunched, isAdminRoute, settings.enableIpRotation, settings.useUserOwnIp, fetchSnapshot, fetchStatus]);
 
   // Manual IP rotation trigger
   const handleManualRotateIp = async () => {
@@ -463,8 +469,6 @@ export default function App() {
           inputRects={inputRects}
           isInputFocused={isInputFocused}
           onSendAction={sendBrowserAction}
-          ipInfo={ipInfo}
-          onManualRotateIp={handleManualRotateIp}
           targetUrl={settings.targetUrl || 'https://app.apponfly.com/trial'}
           onBackToLaunch={() => setIsLaunched(false)}
         />

@@ -13,6 +13,7 @@ import {
 import {
   generateResidentialProfile,
   applyStealthProfileToPage,
+  generateSimulatedAppOnFlyFrame,
   type ResidentialProfile,
 } from './api/stealth.ts';
 
@@ -162,108 +163,15 @@ function escapeXml(unsafe: string): string {
     .replace(/'/g, '&apos;');
 }
 
-function generateSimulatedAppOnFlyFrame(): string {
-  const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
-  const w = session.viewport.width;
-  const h = session.viewport.height;
-  const safeTyped = escapeXml(session.typedBuffer.slice(-65));
-  const clickCoord = session.lastClick;
-  const inputActive = session.isInputFocused;
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-    <defs>
-      <linearGradient id="winBg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#001830"/>
-        <stop offset="50%" stop-color="#003566"/>
-        <stop offset="100%" stop-color="#000814"/>
-      </linearGradient>
-      <linearGradient id="taskbar" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%" stop-color="#111827"/>
-        <stop offset="100%" stop-color="#030712"/>
-      </linearGradient>
-    </defs>
-
-    <!-- Full-screen Windows Desktop Wallpaper -->
-    <rect width="${w}" height="${h}" fill="url(#winBg)" />
-    <path d="M 0,${h * 0.4} Q ${w * 0.4},${h * 0.2} ${w},${h * 0.6} L ${w},${h} L 0,${h} Z" fill="#0284c7" opacity="0.16"/>
-    <path d="M 0,${h * 0.6} Q ${w * 0.6},${h * 0.3} ${w},${h * 0.8} L ${w},${h} L 0,${h} Z" fill="#38bdf8" opacity="0.1"/>
-
-    <!-- Desktop Icons -->
-    <g transform="translate(28, 36)">
-      <rect x="0" y="0" width="76" height="76" rx="8" fill="rgba(255,255,255,0.06)"/>
-      <path d="M 23,20 h 30 v 22 h -30 Z M 31,42 v 6 h 14 v -6" stroke="#38bdf8" stroke-width="2.5" fill="none"/>
-      <text x="38" y="64" fill="#f8fafc" font-family="sans-serif" font-size="11" text-anchor="middle">This PC</text>
-
-      <g transform="translate(0, 92)">
-        <rect x="0" y="0" width="76" height="76" rx="8" fill="rgba(255,255,255,0.06)"/>
-        <circle cx="38" cy="28" r="15" fill="none" stroke="#f59e0b" stroke-width="3"/>
-        <circle cx="38" cy="28" r="6" fill="#3b82f6"/>
-        <text x="38" y="64" fill="#f8fafc" font-family="sans-serif" font-size="11" text-anchor="middle">Chrome</text>
-      </g>
-
-      <g transform="translate(0, 184)">
-        <rect x="0" y="0" width="76" height="76" rx="8" fill="rgba(255,255,255,0.06)"/>
-        <rect x="24" y="15" width="28" height="28" rx="4" fill="#10b981"/>
-        <text x="38" y="34" fill="#fff" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="middle">W</text>
-        <text x="38" y="64" fill="#f8fafc" font-family="sans-serif" font-size="11" text-anchor="middle">Notepad</text>
-      </g>
-    </g>
-
-    <!-- Active Windows Cloud Browser Window -->
-    <g transform="translate(135, 36)">
-      <rect width="${w - 170}" height="${h - 104}" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
-      <rect width="${w - 170}" height="38" rx="10" fill="#1e293b"/>
-      <circle cx="18" cy="19" r="5" fill="#ef4444"/>
-      <circle cx="34" cy="19" r="5" fill="#f59e0b"/>
-      <circle cx="50" cy="19" r="5" fill="#10b981"/>
-      <text x="72" y="24" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="12" font-weight="600">AppOnFly Windows 11 Cloud Session — IP: ${session.currentIp}</text>
-
-      <!-- Address / Input Box inside Remote Desktop (x: 155..1225, y: 90..134) -->
-      <rect x="20" y="54" width="${w - 210}" height="44" rx="8" fill="#020617" stroke="${
-        inputActive ? '#38bdf8' : '#334155'
-      }" stroke-width="${inputActive ? '2' : '1.5'}"/>
-      <text x="36" y="81" fill="${inputActive ? '#38bdf8' : '#94a3b8'}" font-family="monospace" font-size="15">${
-        safeTyped
-          ? safeTyped + (inputActive ? '|' : '')
-          : inputActive
-          ? '| Type using your phone keyboard...'
-          : 'Click inside this input box to open keyboard...'
-      }</text>
-
-      <!-- Main Workspace -->
-      <rect x="20" y="114" width="${w - 210}" height="${h - 238}" rx="8" fill="#111827" stroke="#1e293b"/>
-      <text x="${(w - 170) / 2}" y="195" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="22" font-weight="bold" text-anchor="middle">AppOnFly Remote Desktop Active</text>
-      <text x="${(w - 170) / 2}" y="228" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="14" text-anchor="middle">Landscape 16:9 HD • Keyboard opens only on input fields • Auto IP rotation every 20.5m</text>
-
-      <rect x="${(w - 170) / 2 - 150}" y="260" width="300" height="44" rx="8" fill="#0284c7"/>
-      <text x="${(w - 170) / 2}" y="287" fill="#ffffff" font-family="system-ui, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Session IP: ${session.currentIp}</text>
-    </g>
-
-    ${
-      clickCoord
-        ? `<circle cx="${clickCoord.x}" cy="${clickCoord.y}" r="16" fill="rgba(56, 189, 248, 0.35)" stroke="#38bdf8" stroke-width="2"/>
-           <circle cx="${clickCoord.x}" cy="${clickCoord.y}" r="4" fill="#38bdf8"/>`
-        : ''
-    }
-
-    <!-- Windows 11 Taskbar -->
-    <rect x="0" y="${h - 46}" width="${w}" height="46" fill="url(#taskbar)" />
-    <rect x="14" y="${h - 38}" width="34" height="30" rx="4" fill="#0284c7"/>
-    <g transform="translate(22, ${h - 31})">
-      <rect x="0" y="0" width="7" height="7" fill="#fff"/>
-      <rect x="9" y="0" width="7" height="7" fill="#fff"/>
-      <rect x="0" y="9" width="7" height="7" fill="#fff"/>
-      <rect x="9" y="9" width="7" height="7" fill="#fff"/>
-    </g>
-    <!-- Windows Search Input Box (x: 58..268, y: 682..712) -->
-    <rect x="58" y="${h - 38}" width="210" height="30" rx="15" fill="rgba(255,255,255,0.08)" stroke="${
-      inputActive ? '#38bdf8' : 'none'
-    }" stroke-width="1"/>
-    <text x="76" y="${h - 19}" fill="#94a3b8" font-family="sans-serif" font-size="12">Search Windows...</text>
-    <text x="${w - 18}" y="${h - 19}" fill="#f8fafc" font-family="monospace" font-size="12" text-anchor="end">${timeStr}</text>
-  </svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+function getCleanDesktopFrame(): string {
+  return generateSimulatedAppOnFlyFrame(
+    session.typedBuffer,
+    session.lastClick || undefined,
+    session.currentIp,
+    session.viewport.width,
+    session.viewport.height,
+    session.isInputFocused
+  );
 }
 
 async function initPuppeteer() {
@@ -400,7 +308,7 @@ setInterval(async () => {
     }
   } else {
     session.inputRects = SIMULATED_INPUT_RECTS;
-    broadcastFrame(generateSimulatedAppOnFlyFrame(), 12);
+    broadcastFrame(getCleanDesktopFrame(), 12);
   }
 }, 500);
 
@@ -431,7 +339,7 @@ app.get('/api/browser/status', (req, res) => {
     timezone: session.currentProfile.timezone,
     lastIpRotationAt: session.lastIpRotationAt,
     nextIpRotationAt: session.lastIpRotationAt + IP_ROTATION_INTERVAL_MS,
-    rotationIntervalMinutes: 20.5,
+    rotationIntervalMinutes: 20.1,
   });
 });
 
@@ -460,7 +368,7 @@ app.get('/api/browser/stream', (req, res) => {
   const initialFrame =
     session.lastFrame ||
     (session.mode === 'simulated-engine'
-      ? generateSimulatedAppOnFlyFrame()
+      ? getCleanDesktopFrame()
       : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=');
   res.write(
     `data: ${JSON.stringify({
@@ -511,7 +419,7 @@ app.get('/api/browser/snapshot', async (req, res) => {
 
   res.json({
     success: true,
-    frame: generateSimulatedAppOnFlyFrame(),
+    frame: getCleanDesktopFrame(),
     url: session.url,
     title: session.title,
     ip: session.currentIp,
@@ -595,7 +503,7 @@ app.post('/api/browser/action', async (req, res) => {
           session.typedBuffer += ' ↵ ';
         }
       }
-      broadcastFrame(generateSimulatedAppOnFlyFrame(), Date.now() - start);
+      broadcastFrame(getCleanDesktopFrame(), Date.now() - start);
     }
 
     res.json({
